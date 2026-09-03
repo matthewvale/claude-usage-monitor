@@ -36,7 +36,7 @@ node ClaudeUsageMonitor.js
 
 ## Requirements
 
-- **Node.js** (any reasonably recent version &mdash; <https://nodejs.org/>).
+- **Node.js** (any reasonably recent version - <https://nodejs.org/>).
   No other dependencies; the server is plain Node stdlib.
 - The **Claude desktop app** or **Claude Code CLI** installed and used at
   least once (that's what writes the transcript files this tool reads).
@@ -74,17 +74,17 @@ active in the header.
 
 The drill-down. Three panels:
 
-- **Left** &mdash; filterable, groupable (by project), sortable list of
+- **Left** - filterable, groupable (by project), sortable list of
   conversations. Click a project header to collapse/expand its
   conversations.
-- **Center** &mdash; each conversation broken into individual prompt cards,
+- **Center** - each conversation broken into individual prompt cards,
   latest first. Click a card to expand it and see:
   - the full prompt text
   - a token breakdown (input / cache read / cache created / output / thinking)
   - the branch timeline of tools used
   - Claude's text response
   - a colour-coded tip if there's an insight worth acting on
-- **Right** &mdash; details for whatever is selected (conversation, tool
+- **Right** - details for whatever is selected (conversation, tool
   call, or the aggregate when nothing is selected).
 
 Both pages share the header controls: **Source**, **Project**, **Sort**,
@@ -99,7 +99,7 @@ their widths persist between sessions (`localStorage`).
 | --- | --- |
 | **Source** | All &middot; Desktop app &middot; Terminal CLI |
 | **Project** | All projects, plus every distinct project detected from each conversation's working directory. Sessions run from a scratch/temp workspace show as *No folder*. |
-| **Sort** *(top bar)* | Latest &middot; Most tokens &middot; Longest &mdash; controls the sidebar and Summary page. |
+| **Sort** *(top bar)* | Latest &middot; Most tokens &middot; Longest - controls the sidebar and Summary page. |
 | **Sort** *(canvas toolbar)* | A second, independent sort for the prompt cards within the Conversations canvas. |
 | **Show** | Today *(default)* &middot; last 1h &middot; 6h &middot; 24h &middot; 7d &middot; all history |
 
@@ -130,10 +130,10 @@ turn, so they can dwarf the actual new work on any given prompt. This
 tool separates the two:
 
 - **Total tokens** (input + output + cache created + cache read + thinking)
-  &mdash; shown wherever a token count sits on its own (session totals,
+  - shown wherever a token count sits on its own (session totals,
   aggregate summary, "At a glance").
 - **Fresh tokens** (input + output + cache created + thinking, **excludes
-  cache read**) &mdash; shown next to action counts and used by the
+  cache read**) - shown next to action counts and used by the
   Usage efficiency score, so a small prompt inside a long conversation
   isn't misjudged as "context-heavy".
 
@@ -148,7 +148,7 @@ Each conversation records which Claude model answered each turn:
 - The sidebar meta line shows each conversation's primary model.
 - The Summary page has a **Models** card with a heuristic recommendation
   (e.g. "your heaviest turns could use Opus") based on your own
-  token/tool usage &mdash; not a guarantee, just a pointer.
+  token/tool usage - not a guarantee, just a pointer.
 
 Internal `<synthetic>` placeholder messages (zero-usage, not a real model
 call) are filtered out automatically.
@@ -160,9 +160,9 @@ call) are filtered out automatically.
 | File | What it is |
 | --- | --- |
 | `ClaudeUsageMonitor.js` | The server. Plain Node, no dependencies. |
-| `ClaudeUsageMonitor.cmd` | Windows launcher &mdash; double-click to run. |
-| `ClaudeUsageMonitor.sh` | macOS / Linux launcher &mdash; `chmod +x` then run. |
-| `viewer.html` | The web UI. Edit and refresh &mdash; no server restart needed. |
+| `ClaudeUsageMonitor.cmd` | Windows launcher - double-click to run. |
+| `ClaudeUsageMonitor.sh` | macOS / Linux launcher - `chmod +x` then run. |
+| `viewer.html` | The web UI. Edit and refresh - no server restart needed. |
 | `LICENSE` | MIT license. |
 | `README.md` | This file. |
 
@@ -170,14 +170,14 @@ call) are filtered out automatically.
 
 ## Troubleshooting
 
-- **"Port already in use"** &mdash; a previous instance is still bound to
+- **"Port already in use"** - a previous instance is still bound to
   8439. Open <http://127.0.0.1:8439/> and click **Quit**, or end the
   `node` process from Task Manager / Activity Monitor.
-- **Nothing shows up** &mdash; use the Claude desktop app (or `claude`
+- **Nothing shows up** - use the Claude desktop app (or `claude`
   CLI) for at least one conversation, then reload the viewer.
-- **"Node.js not found"** &mdash; install it from <https://nodejs.org/>
+- **"Node.js not found"** - install it from <https://nodejs.org/>
   and make sure `node` is on your `PATH`, then relaunch.
-- **Console window doesn't close on Mac/Linux when you click Quit** &mdash;
+- **Console window doesn't close on Mac/Linux when you click Quit** -
   that's a terminal setting, not the script. In Terminal.app:
   *Settings &rarr; Profiles &rarr; Shell &rarr; When the shell exits &rarr;
   Close the window*. iTerm2: *Preferences &rarr; Profiles &rarr; Session
