@@ -10,7 +10,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-node "%~dp0ClaudeMonitor.js" %*
+node "%~dp0ClaudeUsageMonitor.js" %*
 if errorlevel 1 (
     echo.
     echo Server stopped with an error.

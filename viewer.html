@@ -2083,7 +2083,7 @@ function showDetail(n) {
 }
 
 async function quitServer() {
-  if (!confirm("Stop the ClaudeMonitor server?")) return;
+  if (!confirm("Stop the Claude Usage Monitor server?")) return;
   try { await fetch("/quit", { method: "POST" }); } catch (e) { }
   document.body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:14px">Server stopped. You can close this tab.</div>';
 }

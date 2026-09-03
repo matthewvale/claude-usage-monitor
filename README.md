@@ -13,7 +13,7 @@ Created by Matt Vale &middot; MIT licensed (see [LICENSE](LICENSE))
 
 ### Windows
 
-1. Double-click `ClaudeMonitor.cmd`.
+1. Double-click `ClaudeUsageMonitor.cmd`.
 2. Your default browser opens at <http://127.0.0.1:8439/> &nbsp;
    *(8439 = V-I-E-W on a phone keypad.)*
 3. To stop it: click **Quit** in the browser, press `Ctrl+C` in the console
@@ -22,14 +22,14 @@ Created by Matt Vale &middot; MIT licensed (see [LICENSE](LICENSE))
 ### macOS / Linux
 
 ```sh
-chmod +x ClaudeMonitor.sh   # first time only
-./ClaudeMonitor.sh
+chmod +x ClaudeUsageMonitor.sh   # first time only
+./ClaudeUsageMonitor.sh
 ```
 
 Or on any platform:
 
 ```sh
-node ClaudeMonitor.js
+node ClaudeUsageMonitor.js
 ```
 
 ---
@@ -52,7 +52,7 @@ Everything runs locally. Nothing is uploaded.
 - Conversations come from the JSONL transcripts Claude Code writes to
   `~/.claude/projects/<project-slug>/<session>.jsonl` (same path shape on
   Windows, macOS and Linux).
-- A tiny Node HTTP server (`ClaudeMonitor.js`) parses those files and
+- A tiny Node HTTP server (`ClaudeUsageMonitor.js`) parses those files and
   serves the viewer HTML plus two JSON endpoints (`/events.json`,
   `/usage.json`).
 
@@ -159,9 +159,9 @@ call) are filtered out automatically.
 
 | File | What it is |
 | --- | --- |
-| `ClaudeMonitor.js` | The server. Plain Node, no dependencies. |
-| `ClaudeMonitor.cmd` | Windows launcher &mdash; double-click to run. |
-| `ClaudeMonitor.sh` | macOS / Linux launcher &mdash; `chmod +x` then run. |
+| `ClaudeUsageMonitor.js` | The server. Plain Node, no dependencies. |
+| `ClaudeUsageMonitor.cmd` | Windows launcher &mdash; double-click to run. |
+| `ClaudeUsageMonitor.sh` | macOS / Linux launcher &mdash; `chmod +x` then run. |
 | `viewer.html` | The web UI. Edit and refresh &mdash; no server restart needed. |
 | `LICENSE` | MIT license. |
 | `README.md` | This file. |

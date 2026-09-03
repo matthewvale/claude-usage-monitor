@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// ClaudeMonitor - reads Claude Code's own transcript files and serves a live
-// usage/decision dashboard over HTTP. No dependencies beyond Node's stdlib.
+// Claude Usage Monitor - reads Claude Code's own transcript files and serves
+// a live usage/decision dashboard over HTTP. No dependencies beyond Node's stdlib.
 // Copyright (c) 2026 Matt Vale. MIT licensed - see LICENSE.
 //
-// Run:  node ClaudeMonitor.js
-// Or double-click ClaudeMonitor.cmd (Windows) / run ClaudeMonitor.sh (Mac/Linux).
+// Run:  node ClaudeUsageMonitor.js
+// Or double-click ClaudeUsageMonitor.cmd (Windows) / run ClaudeUsageMonitor.sh (Mac/Linux).
 
 'use strict';
 
@@ -229,9 +229,9 @@ function getViewerHtml() {
   try {
     return fs.readFileSync(p, 'utf8');
   } catch (e) {
-    return '<!doctype html><meta charset="utf-8"><title>Claude Summary Viewer</title>' +
+    return '<!doctype html><meta charset="utf-8"><title>Claude Usage Monitor</title>' +
       '<body style="background:#0b0f14;color:#e6edf3;font:14px sans-serif;padding:24px">' +
-      'viewer.html not found next to ClaudeMonitor.js</body>';
+      'viewer.html not found next to ClaudeUsageMonitor.js</body>';
   }
 }
 
@@ -298,6 +298,6 @@ server.on('error', (err) => {
 
 server.listen(PORT, HOST, () => {
   const url = `http://${HOST}:${PORT}/`;
-  console.log('Claude Summary Viewer at ' + url);
+  console.log('Claude Usage Monitor at ' + url);
   openBrowser(url);
 });
