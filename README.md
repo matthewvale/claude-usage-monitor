@@ -7,6 +7,8 @@ could use less.
 
 Created by Matt Vale &middot; MIT licensed (see [LICENSE](LICENSE))
 
+<img width="1935" height="1592" alt="summary" src="https://github.com/user-attachments/assets/01206b02-3179-4333-9b3e-0ed8e0a8292d" />
+
 ---
 
 ## How to run
