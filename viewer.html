@@ -341,6 +341,55 @@
   .usage-limit-bar > div.danger { background: var(--bad); }
   .usage-limit-hint { color: var(--muted); font-size: 10px; margin-top: 5px; }
   @media (max-width: 700px) { .usage-limits { grid-template-columns: 1fr; } }
+
+  /* Cost breakdown */
+  .cost-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+               margin-bottom: 14px; }
+  .cost-total { font-size: 34px; font-weight: 700; color: var(--root); line-height: 1; }
+  .cost-total-lab { font-size: 12px; color: var(--muted); }
+  .cost-split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 26px; }
+  @media (max-width: 1000px) { .cost-split { grid-template-columns: 1fr; } }
+  .cost-row { display: grid; grid-template-columns: 96px 1fr auto; align-items: center;
+              gap: 10px; font-size: 12px; }
+  .cost-row .ck { color: var(--muted); }
+  .cost-row .cbar { height: 6px; background: var(--hover); border-radius: 3px;
+                    overflow: hidden; min-width: 0; }
+  .cost-row .cbar > div { height: 100%; border-radius: 3px; }
+  .cost-row .cv { font-variant-numeric: tabular-nums; color: var(--text);
+                  white-space: nowrap; }
+  .cost-row .cv small { color: var(--muted); margin-left: 6px; }
+  .cost-models { margin-top: 16px; border-top: 1px solid var(--edge); padding-top: 12px; }
+  .cost-models-head { font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+                      color: var(--muted); margin-bottom: 8px; }
+  .cost-model-row { display: grid;
+                    grid-template-columns: minmax(160px,1fr) 64px 72px 84px 76px 80px;
+                    gap: 12px; align-items: baseline; font-size: 12px; padding: 5px 0;
+                    border-bottom: 1px solid var(--edge); }
+  .cost-model-row:last-of-type { border-bottom: 0; }
+  .cost-model-hdr { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+                    color: var(--muted); border-bottom: 1px solid var(--edge); }
+  .cost-model-row .cm-n { text-align: right; font-variant-numeric: tabular-nums;
+                          color: var(--muted); }
+  .cost-model-row .cm-rate { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  .cost-model-row .cm-badge { font-size: 9px; text-transform: uppercase;
+                              letter-spacing: .05em; color: var(--good);
+                              border: 1px solid var(--good); border-radius: 3px;
+                              padding: 1px 5px; margin-left: 6px; white-space: nowrap; }
+  /* Cheapest per action - same green language as the usage efficiency card. */
+  .cost-model-row.cm-best { background: linear-gradient(135deg, rgba(61,220,132,0.14) 0%, rgba(61,220,132,0.03) 55%);
+                            border-left: 2px solid var(--good);
+                            margin: 0 -10px; padding-left: 10px; padding-right: 10px;
+                            border-radius: 4px; }
+  .cost-model-row.cm-best > div:first-child { color: var(--good); font-weight: 700; }
+  .cost-model-row.cm-best .cm-n { color: var(--good); }
+  .cost-model-row.cm-best .cm-rate { color: var(--good); opacity: .75; font-weight: 400; }
+  .cost-model-row.cm-best .cm-cost { color: var(--good); }
+  .cost-model-row .cm-cost { text-align: right; font-variant-numeric: tabular-nums;
+                             font-weight: 700; color: var(--root); }
+  @media (max-width: 1000px) {
+    .cost-model-row { grid-template-columns: 1fr auto auto; }
+    .cost-model-row .cm-n:nth-child(2), .cost-model-row .cm-n:nth-child(3) { display: none; }
+  }
   .sum-row { display: flex; justify-content: space-between; align-items: baseline; gap:12px; padding: 8px 0; border-bottom: 1px dashed var(--edge); font-size: 13px; }
   .sum-row:last-child { border-bottom: 0; }
   .sum-row .k { color: var(--muted); }
@@ -826,12 +875,164 @@ function fmtRel(ts) {
   return Math.round(s / 86400) + "d ago";
 }
 
+// ---------------- cost estimation -------------------------------------------
+// Anthropic first-party API list prices, US dollars per million tokens.
+// Cache writes bill at 1.25x the input rate (5-minute TTL, which is what Claude
+// Code uses); cache reads bill at 0.1x the input rate, except on Fable 5.1
+// where reads are 0.025x ($0.25/MTok).
+const MODEL_PRICING = {
+  "claude-fable-5-1":  { in: 10, out: 50, cacheRead: 0.025 },
+  "claude-mythos-5-1": { in: 10, out: 50, cacheRead: 0.025 },
+  "claude-fable-5":    { in: 10, out: 50 },
+  "claude-opus-5":     { in: 5,  out: 25 },
+  "claude-opus-4-8":   { in: 5,  out: 25 },
+  "claude-opus-4-7":   { in: 5,  out: 25 },
+  "claude-opus-4-6":   { in: 5,  out: 25 },
+  "claude-sonnet-5":   { in: 2,  out: 10 },
+  "claude-sonnet-4-6": { in: 3,  out: 15 },
+  "claude-haiku-4-5":  { in: 1,  out: 5  },
+};
+const CACHE_WRITE_MULT = 1.25;   // 5-minute TTL
+const CACHE_READ_MULT  = 0.10;   // default when a model has no override
+
+// Exact match first, then fall back to the family's current rate so a model
+// released after this table was written still prices sensibly. Unknown models
+// return null so the UI can say so rather than quietly bill them at zero.
+function pricingFor(model) {
+  if (!model) return null;
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  if (/opus/i.test(model))   return { in: 5, out: 25, approx: true };
+  if (/sonnet/i.test(model)) return { in: 2, out: 10, approx: true };
+  if (/haiku/i.test(model))  return { in: 1, out: 5,  approx: true };
+  if (/fable|mythos/i.test(model)) return { in: 10, out: 50, cacheRead: 0.025, approx: true };
+  return null;
+}
+
+// Thinking tokens are already counted inside output_tokens, so they are
+// deliberately not added again here - doing so would inflate the bill.
+function costForTurn(model, inTok, outTok, cacheCreate, cacheRead) {
+  const p = pricingFor(model);
+  if (!p) return 0;
+  const readMult = p.cacheRead != null ? p.cacheRead : CACHE_READ_MULT;
+  return (inTok * p.in
+        + cacheCreate * p.in * CACHE_WRITE_MULT
+        + cacheRead * p.in * readMult
+        + outTok * p.out) / 1e6;
+}
+
+// Splits the bill four ways so it is obvious which lever matters. Cache reads
+// are usually the biggest token count but the smallest cost, and seeing that
+// side by side is the whole point of the card.
+function renderCostCard(agg) {
+  const parts = [];
+  let inCost = 0, outCost = 0, writeCost = 0, readCost = 0;
+  for (const [mid, sp] of agg.modelSpend) {
+    const p = pricingFor(mid);
+    if (!p) continue;
+    const readMult = p.cacheRead != null ? p.cacheRead : CACHE_READ_MULT;
+    inCost    += sp.inTok * p.in / 1e6;
+    outCost   += sp.outTok * p.out / 1e6;
+    writeCost += sp.cacheCreate * p.in * CACHE_WRITE_MULT / 1e6;
+    readCost  += sp.cacheRead * p.in * readMult / 1e6;
+  }
+  const total = agg.cost || 0;
+  const rows = [
+    ["Input",       agg.inTok,       inCost,    "var(--accent)"],
+    ["Output",      agg.outTok,      outCost,   "var(--root)"],
+    ["Cache write", agg.cacheCreate, writeCost, "var(--good)"],
+    ["Cache read",  agg.cacheRead,   readCost,  "var(--muted)"],
+  ];
+  const maxCost = Math.max(inCost, outCost, writeCost, readCost, 1e-9);
+
+  parts.push('<div class="sum-card span-12"><h3>Estimated usage costs</h3>');
+  parts.push('<div class="cost-head"><div class="cost-total">' + fmtMoney(total) + '</div>' +
+    '<div class="cost-total-lab">at Anthropic API list prices for ' + escapeHtml(currentRangeLabel()) + '</div></div>');
+
+  parts.push('<div class="cost-split">');
+  for (const [label, toks, cost, color] of rows) {
+    const pct = total ? (cost / total) * 100 : 0;
+    parts.push('<div class="cost-row">' +
+      '<div class="ck">' + label + '</div>' +
+      '<div class="cbar"><div style="width:' + ((cost / maxCost) * 100).toFixed(1) + '%;background:' + color + '"></div></div>' +
+      '<div class="cv">' + fmtMoney(cost) + '<small>' + Math.round(pct) + '% · ' + fmtNum(toks) + ' tok</small></div>' +
+    '</div>');
+  }
+  parts.push('</div>');
+
+  const spendRows = Array.from(agg.modelSpend.entries()).sort((a, b) => b[1].cost - a[1].cost);
+  if (spendRows.length) {
+    // Only models with enough turns to mean anything get ranked on rate.
+    const ranked = spendRows.filter(([, sp]) => sp.turns >= 20 && sp.actions >= 20);
+    let cheapestAction = null, cheapestTurn = null;
+    if (ranked.length > 1) {
+      cheapestAction = ranked.slice().sort((a, b) => (a[1].cost / a[1].actions) - (b[1].cost / b[1].actions))[0][0];
+      cheapestTurn   = ranked.slice().sort((a, b) => (a[1].cost / a[1].turns)   - (b[1].cost / b[1].turns))[0][0];
+    }
+    parts.push('<div class="cost-models"><div class="cost-models-head">Cost efficiency by model</div>');
+    parts.push('<div class="cost-model-row cost-model-hdr">' +
+      '<div>Model</div><div class="cm-n">turns</div><div class="cm-n">actions</div>' +
+      '<div class="cm-n">$ / action</div><div class="cm-n">$ / turn</div><div class="cm-n">total</div></div>');
+    for (const [mid, sp] of spendRows) {
+      const p = pricingFor(mid);
+      const perAction = sp.actions ? sp.cost / sp.actions : null;
+      const perTurn   = sp.turns ? sp.cost / sp.turns : null;
+      const badge = (mid === cheapestAction || mid === cheapestTurn)
+        ? ' <span class="cm-badge">cheapest ' + (mid === cheapestAction ? 'per action' : '') +
+          (mid === cheapestAction && mid === cheapestTurn ? ' &amp; ' : '') +
+          (mid === cheapestTurn ? 'per turn' : '') + '</span>'
+        : '';
+      const rate = p ? ('$' + p.in + '/$' + p.out + ' per M' + (p.approx ? ', assumed' : '')) : 'unpriced';
+      parts.push('<div class="cost-model-row' + (mid === cheapestAction ? ' cm-best' : '') + '">' +
+        '<div>' + escapeHtml(prettyModel(mid)) + badge +
+          '<div class="cm-rate">' + rate + '</div></div>' +
+        '<div class="cm-n">' + fmtNum(sp.turns) + '</div>' +
+        '<div class="cm-n">' + fmtNum(sp.actions) + '</div>' +
+        '<div class="cm-n">' + (perAction != null ? '$' + perAction.toFixed(3) : '-') + '</div>' +
+        '<div class="cm-n">' + (perTurn != null ? '$' + perTurn.toFixed(3) : '-') + '</div>' +
+        '<div class="cm-cost">' + fmtMoney(sp.cost) + '</div>' +
+      '</div>');
+    }
+    parts.push('<div class="sum-sub" style="margin-top:10px">Rates from your own history, not a controlled test - you give different models different work, so only the list price on each row is model-intrinsic.</div>');
+    parts.push('</div>');
+  }
+
+  // Name the actual biggest line rather than assuming which one it is - on a
+  // long agentic workload cache reads can dominate cost as well as token count,
+  // even at 0.1x, simply because the volume is enormous.
+  const biggest = rows.slice().sort((a, b) => b[2] - a[2])[0];
+  let note = 'API list prices - cache writes bill at 1.25x input, reads at 0.1x.';
+  if (biggest && total) {
+    note += ' Biggest line: <b>' + biggest[0].toLowerCase() + '</b> at ' +
+            Math.round((biggest[2] / total) * 100) + '%.';
+  }
+  if (agg.unpricedTurns) {
+    note += ' ' + fmtNum(agg.unpricedTurns) + ' turn' + (agg.unpricedTurns === 1 ? '' : 's') +
+            ' on unpriced models excluded.';
+  }
+  note += ' Not a bill if you are on Pro or Max.';
+  parts.push('<div class="sum-sub" style="margin-top:12px">' + note + '</div></div>');
+  return parts.join('');
+}
+
+function fmtMoney(n) {
+  if (!n) return "$0.00";
+  if (n < 0.01) return "<$0.01";
+  if (n < 100) return "$" + n.toFixed(2);
+  return "$" + Math.round(n).toLocaleString();
+}
+
 function summarizeSession(evs) {
   let prompts = 0, tools = 0, turns = 0;
   let inTok = 0, outTok = 0, cacheCreate = 0, cacheRead = 0, thinking = 0;
   let firstPrompt = null, entrypoint = null, cwd = null, aiTitle = null;
   const modelCounts = new Map();
   const effortCounts = new Map();
+  const modelSpend = new Map();   // modelId -> { cost, tokens, turns, actions, ... }
+  let cost = 0, unpricedTurns = 0;
+  // Tool calls arrive as PreToolUse events just before the AssistantTurn from
+  // the same assistant row, so buffer them and bank them against that turn's
+  // model once it is known.
+  let pendingActions = 0;
   let lastModel = null;
   let firstTs = Infinity, lastTs = 0;
   for (const e of evs) {
@@ -847,7 +1048,7 @@ function summarizeSession(evs) {
       if (!entrypoint && e.entrypoint) entrypoint = e.entrypoint;
       if (!cwd && e.cwd) cwd = e.cwd;
     }
-    else if (e.event === "PreToolUse") { tools++; }
+    else if (e.event === "PreToolUse") { tools++; pendingActions++; }
     else if (e.event === "AssistantTurn") {
       turns++;
       inTok += e.input_tokens || 0;
@@ -855,10 +1056,25 @@ function summarizeSession(evs) {
       cacheCreate += e.cache_creation || 0;
       cacheRead += e.cache_read || 0;
       thinking += e.thinking_tokens || 0;
+      // Price each turn against the model that actually served it, so a
+      // conversation that switched models mid-way still costs out correctly.
+      const ti = e.input_tokens || 0, to = e.output_tokens || 0;
+      const tcc = e.cache_creation || 0, tcr = e.cache_read || 0;
+      const turnCost = costForTurn(e.model, ti, to, tcc, tcr);
+      cost += turnCost;
+      if (!pricingFor(e.model)) unpricedTurns++;
       if (e.model) {
         modelCounts.set(e.model, (modelCounts.get(e.model) || 0) + 1);
+        const sp = modelSpend.get(e.model)
+                || { cost: 0, inTok: 0, outTok: 0, cacheCreate: 0, cacheRead: 0,
+                     turns: 0, actions: 0 };
+        sp.cost += turnCost; sp.inTok += ti; sp.outTok += to;
+        sp.cacheCreate += tcc; sp.cacheRead += tcr;
+        sp.turns++; sp.actions += pendingActions;
+        modelSpend.set(e.model, sp);
         lastModel = e.model;
       }
+      pendingActions = 0;
       if (e.effort) effortCounts.set(e.effort, (effortCounts.get(e.effort) || 0) + 1);
     }
   }
@@ -875,6 +1091,7 @@ function summarizeSession(evs) {
     lastTs,
     prompts, tools, turns,
     inTok, outTok, cacheCreate, cacheRead, thinking,
+    cost, modelSpend, unpricedTurns,
     totalTokens: inTok + outTok + cacheCreate + cacheRead,
     // Cache reads are reused context, not new work. Used specifically where a
     // token figure sits next to an action count, so that number reflects what
@@ -1094,12 +1311,25 @@ function showAggregateDetail() {
 
   const agg = { convs: inScope.length, prompts: 0, turns: 0, tools: 0,
                 inTok: 0, outTok: 0, cacheCreate: 0, cacheRead: 0, thinking: 0,
-                total: 0, first: Infinity, last: 0, desktop: 0, cli: 0 };
+                total: 0, first: Infinity, last: 0, desktop: 0, cli: 0,
+                cost: 0, unpricedTurns: 0, modelSpend: new Map() };
   for (const [, , s] of inScope) {
     agg.prompts += s.prompts; agg.turns += s.turns; agg.tools += s.tools;
     agg.inTok += s.inTok; agg.outTok += s.outTok;
     agg.cacheCreate += s.cacheCreate; agg.cacheRead += s.cacheRead;
     agg.thinking += s.thinking; agg.total += s.totalTokens;
+    agg.cost += s.cost || 0; agg.unpricedTurns += s.unpricedTurns || 0;
+    if (s.modelSpend) {
+      for (const [mid, sp] of s.modelSpend) {
+        const a = agg.modelSpend.get(mid)
+               || { cost: 0, inTok: 0, outTok: 0, cacheCreate: 0, cacheRead: 0,
+                    turns: 0, actions: 0 };
+        a.cost += sp.cost; a.inTok += sp.inTok; a.outTok += sp.outTok;
+        a.cacheCreate += sp.cacheCreate; a.cacheRead += sp.cacheRead;
+        a.turns += sp.turns || 0; a.actions += sp.actions || 0;
+        agg.modelSpend.set(mid, a);
+      }
+    }
     if (s.firstTs < agg.first) agg.first = s.firstTs;
     if (s.lastTs > agg.last)   agg.last  = s.lastTs;
     if (s.source === "desktop") agg.desktop++; else agg.cli++;
@@ -1126,6 +1356,7 @@ function showAggregateDetail() {
     ["Cache read",      fmtNum(agg.cacheRead)],
     ["Thinking",        fmtNum(agg.thinking)],
     ["Total tokens",    fmtNum(agg.total)],
+    ["Est. cost",       fmtMoney(agg.cost || 0)],
   ];
   renderStatGrid(rows);
 }
@@ -1175,16 +1406,21 @@ function showSessionDetail(s) {
   rows.push(["Cache read",      fmtNum(s.cacheRead)]);
   rows.push(["Thinking",        fmtNum(s.thinking)]);
   rows.push(["Total",           fmtNum(s.totalTokens)]);
+  rows.push(["Est. cost",       fmtMoney(s.cost || 0)]);
   renderStatGrid(rows);
 }
 
 function shorten(s, n) { s = String(s).replace(/\s+/g, " ").trim(); return s.length <= n ? s : s.slice(0, n-1) + "…"; }
 
 let usageData = null;   // { fh: percent used 0-100, sd: percent used 0-100 } or null until loaded
+let usageMisses = 0;    // consecutive failed/empty /usage.json reads
 
 function renderUsageLimits() {
   if (!usageData) {
-    return '<div class="usage-limits"><em style="color:var(--muted);font-size:12px">Loading plan usage…</em></div>';
+    const msg = usageMisses >= 3
+      ? 'Plan usage unavailable - the Claude desktop app writes this, so it only appears if that app has run recently.'
+      : 'Loading plan usage…';
+    return '<div class="usage-limits"><em style="color:var(--muted);font-size:12px">' + msg + '</em></div>';
   }
   const bar = (label, usedPct, hint) => {
     const pct = Math.max(0, Math.min(100, usedPct));
@@ -1204,19 +1440,31 @@ function renderUsageLimits() {
 
 async function fetchUsage() {
   let nextDelay = 60000;
+  let needsRepaint = false;
   try {
     const r = await fetch("/usage.json", { cache: "no-store" });
     const d = await r.json();
     if (typeof d.fh === "number" && typeof d.sd === "number") {
-      const changed = !usageData || usageData.fh !== d.fh || usageData.sd !== d.sd;
+      needsRepaint = !usageData || usageData.fh !== d.fh || usageData.sd !== d.sd;
       usageData = { fh: d.fh, sd: d.sd };
-      if (changed && currentPage === "summary") renderSummary();
-    } else if (!usageData) {
-      nextDelay = 5000;   // not written yet - retry soon
+      usageMisses = 0;
+    } else {
+      usageMisses++;
+      if (!usageData) { nextDelay = 5000; needsRepaint = usageMisses === 3; }
     }
   } catch (e) {
+    usageMisses++;
     nextDelay = usageData ? 30000 : 5000;
+    if (!usageData && usageMisses === 3) needsRepaint = true;
   }
+  // Repaint outside the fetch try/catch so a render error can't be mistaken for
+  // a fetch failure (that used to leave the bars stuck on "Loading plan usage").
+  // Also repaint whenever the card is still showing the placeholder, since the
+  // value can arrive before the first summary render has any events to draw.
+  try {
+    const stale = document.querySelector("#page-summary .usage-limits em");
+    if (currentPage === "summary" && (needsRepaint || (usageData && stale))) renderSummary();
+  } catch (e) { /* summary not renderable yet - next tick will pick it up */ }
   setTimeout(fetchUsage, nextDelay);
 }
 
@@ -1555,7 +1803,7 @@ function renderSummary() {
     return;
   }
 
-  const agg = { convs:inScope.length, prompts:0, turns:0, tools:0, inTok:0, outTok:0, cacheCreate:0, cacheRead:0, thinking:0, total:0, first:Infinity, last:0 };
+  const agg = { convs:inScope.length, prompts:0, turns:0, tools:0, inTok:0, outTok:0, cacheCreate:0, cacheRead:0, thinking:0, total:0, first:Infinity, last:0, cost:0, unpricedTurns:0, modelSpend:new Map() };
   const toolCounts={}, modelTurns={}, modelTokens={}, modelActions={}, effortTurns={}, effortFreshTokens={}, effortActions={}, activities={}, projectTotals={};
   let duplicateCalls=0;
   const duplicateExamples={};   // "tool_name" -> extra-call count, across all sessions
@@ -1563,6 +1811,14 @@ function renderSummary() {
     let pendingActions=0;
     agg.prompts += s.prompts; agg.turns += s.turns; agg.tools += s.tools;
     agg.inTok += s.inTok; agg.outTok += s.outTok; agg.cacheCreate += s.cacheCreate; agg.cacheRead += s.cacheRead; agg.thinking += s.thinking; agg.total += s.totalTokens;
+    agg.cost += s.cost || 0; agg.unpricedTurns += s.unpricedTurns || 0;
+    if (s.modelSpend) { for (const [mid, sp] of s.modelSpend) {
+      const a = agg.modelSpend.get(mid) || { cost:0, inTok:0, outTok:0, cacheCreate:0, cacheRead:0, turns:0, actions:0 };
+      a.cost += sp.cost; a.inTok += sp.inTok; a.outTok += sp.outTok;
+      a.cacheCreate += sp.cacheCreate; a.cacheRead += sp.cacheRead;
+      a.turns += sp.turns || 0; a.actions += sp.actions || 0;
+      agg.modelSpend.set(mid, a);
+    } }
     agg.first=Math.min(agg.first,s.firstTs); agg.last=Math.max(agg.last,s.lastTs);
     projectTotals[s.project]=(projectTotals[s.project]||0)+s.totalTokens;
     const seenCalls={};   // reset per session - repeating a call across DIFFERENT sessions is normal
@@ -1639,7 +1895,8 @@ function renderSummary() {
   html.push('<div class="sum-big"><div class="n">'+agg.prompts+'</div><div class="l">prompts</div><div class="delta">'+(agg.convs? (agg.prompts/agg.convs).toFixed(1):'0')+' per conversation</div></div>');
   html.push('<div class="sum-big"><div class="n accent">'+agg.tools+'</div><div class="l">actions</div><div class="delta">'+avgTools.toFixed(1)+' per prompt</div></div>');
   html.push('<div class="sum-big"><div class="n">'+fmtNum(agg.turns)+'</div><div class="l">assistant turns</div><div class="delta">'+avgTurnsPerPrompt.toFixed(1)+' per prompt · '+fmtNum(avgTokens)+' tok/turn</div></div>');
-  html.push('</div></div>');
+  html.push('</div>' + renderUsageLimits() + '</div>');
+
 
   const scoreHealthy=score>=65;
   const ringColor=scoreHealthy?'var(--good)':(score>=50?'var(--accent)':'var(--bad)');
@@ -1725,6 +1982,8 @@ function renderSummary() {
     html.push('<div class="sum-sub" style="margin-top:10px">How much reasoning effort Claude used per turn. Higher effort costs more but can help with harder problems.</div>');
     html.push('</div>');
   }
+
+  html.push(renderCostCard(agg));
 
   if (proj === 'all') {
     html.push('<div class="sum-card span-6"><h3>Where is my usage?</h3>');
@@ -2131,6 +2390,7 @@ function setupResizer(divId, panelId, cssVar, storageKey, compute) {
 
 initResizers();
 tick();
+fetchUsage();
 </script>
 </body>
 </html>

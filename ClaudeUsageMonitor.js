@@ -188,20 +188,54 @@ function getEventsJson(hours) {
 
 // ---------------- plan usage ---------------------------------------------------
 
-function getUsageHistoryPath() {
+// Every place the desktop app might keep plan-usage-history.json.
+// On Windows the app ships two ways: a classic installer that writes to
+// %APPDATA%\Claude, and a Microsoft Store / MSIX package that has its
+// %APPDATA% writes redirected into the package's own LocalCache. The MSIX
+// package name carries a publisher hash (Claude_pzs8sxrjxfjjc), so match on
+// the prefix rather than hard-coding it.
+function usageHistoryCandidates() {
+  const out = [];
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
-    return path.join(appData, 'Claude', 'plan-usage-history.json');
+    out.push(path.join(appData, 'Claude', 'plan-usage-history.json'));
+
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    const pkgRoot = path.join(localAppData, 'Packages');
+    let pkgs = [];
+    try {
+      pkgs = fs.readdirSync(pkgRoot, { withFileTypes: true })
+        .filter(d => d.isDirectory() && /^Claude/i.test(d.name))
+        .map(d => d.name);
+    } catch (e) { /* no Packages dir - not a Store install */ }
+    for (const pkg of pkgs) {
+      out.push(path.join(pkgRoot, pkg, 'LocalCache', 'Roaming', 'Claude', 'plan-usage-history.json'));
+    }
+  } else if (process.platform === 'darwin') {
+    out.push(path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'plan-usage-history.json'));
+  } else {
+    out.push(path.join(os.homedir(), '.config', 'Claude', 'plan-usage-history.json'));
   }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'Claude', 'plan-usage-history.json');
+  return out;
+}
+
+// Returns the most recently written candidate, or null if none exist.
+// Newest wins so that having both install flavours present still tracks
+// whichever app the user is actually running.
+function getUsageHistoryPath() {
+  let best = null, bestMtime = -1;
+  for (const p of usageHistoryCandidates()) {
+    try {
+      const st = fs.statSync(p);
+      if (st.isFile() && st.mtimeMs > bestMtime) { bestMtime = st.mtimeMs; best = p; }
+    } catch (e) { /* candidate absent */ }
   }
-  return path.join(os.homedir(), '.config', 'Claude', 'plan-usage-history.json');
+  return best;
 }
 
 function getUsageJson() {
   const p = getUsageHistoryPath();
-  if (!fs.existsSync(p)) return '{}';
+  if (!p) return '{}';
   try {
     const raw = fs.readFileSync(p, 'utf8');
     // Regex-match the LAST sample record instead of parsing the whole (potentially
