@@ -13,6 +13,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const zlib = require('zlib');
+const crypto = require('crypto');
 
 const HOST = '127.0.0.1';
 const PORT = 8439; // 8439 = V-I-E-W on a phone keypad.
@@ -139,18 +141,39 @@ function walkJsonlFiles(dir, out) {
 
 const transcriptCache = new Map(); // filePath -> { mtimeMs, events }
 
-function getTranscriptEvents() {
+// The merged/sorted event list is expensive to rebuild (concat + sort over every
+// event in ~/.claude/projects), so keep the last one and only redo the work when
+// the set of transcript files actually changes. `sig` is a cheap fingerprint of
+// every file's path/mtime/size - stat-ing the tree is the only per-poll cost.
+let eventsAllCache = { sig: null, events: [] };
+
+function scanTranscripts() {
   const projRoot = getClaudeProjectsRoot();
-  if (!fs.existsSync(projRoot)) return [];
+  if (!fs.existsSync(projRoot)) return { sig: 'none', files: [] };
+
+  const paths = [];
+  walkJsonlFiles(projRoot, paths);
+  paths.sort();
 
   const files = [];
-  walkJsonlFiles(projRoot, files);
+  const h = crypto.createHash('sha1');
+  for (const file of paths) {
+    let st;
+    try { st = fs.statSync(file); } catch (e) { continue; }
+    files.push({ file, mtimeMs: st.mtimeMs });
+    h.update(file); h.update('\0'); h.update(String(st.mtimeMs)); h.update(':'); h.update(String(st.size)); h.update('\n');
+  }
+  return { sig: h.digest('hex'), files };
+}
+
+function getTranscriptEvents() {
+  const { sig, files } = scanTranscripts();
+  if (eventsAllCache.sig === sig) return eventsAllCache.events;
 
   const all = [];
-  for (const file of files) {
-    let mtimeMs;
-    try { mtimeMs = fs.statSync(file).mtimeMs; } catch (e) { continue; }
-
+  const live = new Set();
+  for (const { file, mtimeMs } of files) {
+    live.add(file);
     const cached = transcriptCache.get(file);
     if (cached && cached.mtimeMs === mtimeMs) {
       for (const e of cached.events) all.push(e);
@@ -172,18 +195,69 @@ function getTranscriptEvents() {
     transcriptCache.set(file, { mtimeMs, events });
     for (const e of events) all.push(e);
   }
+  // Drop cache entries for transcripts that have gone away, so a long-running
+  // monitor does not hold every session it has ever seen in memory.
+  for (const key of transcriptCache.keys()) if (!live.has(key)) transcriptCache.delete(key);
 
   all.sort((a, b) => a.ts - b.ts);
+  eventsAllCache = { sig, events: all };
   return all;
 }
 
-function getEventsJson(hours) {
-  let events = getTranscriptEvents();
+// Index of the first event at or after `cutoff` in the ts-sorted array.
+function lowerBound(events, cutoff) {
+  let lo = 0, hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (events[mid].ts < cutoff) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+
+// Serialized responses are cached too: re-stringifying several MB of JSON on
+// every 800ms poll was the other half of the cost. The key folds in the moving
+// window cutoff (rounded to 30s) so events still age out of the range on time.
+const jsonCache = new Map(); // key -> { body, etag }
+
+function getEventsResponse(hours) {
+  const events = getTranscriptEvents();
+  let cutoffKey = 'all';
+  let slice = events;
   if (hours > 0) {
     const cutoff = Date.now() / 1000 - hours * 3600;
-    events = events.filter(e => e.ts >= cutoff);
+    cutoffKey = String(Math.floor(cutoff / 30));
+    slice = events.slice(lowerBound(events, cutoff));
   }
-  return JSON.stringify(events);
+  const key = eventsAllCache.sig + '|' + cutoffKey;
+  const hit = jsonCache.get(key);
+  if (hit) return hit;
+
+  const body = Buffer.from(JSON.stringify(slice), 'utf8');
+  const etag = '"' + crypto.createHash('sha1').update(body).digest('hex') + '"';
+  const entry = { body, etag };
+  jsonCache.clear(); // only the current key is ever useful
+  jsonCache.set(key, entry);
+  return entry;
+}
+
+// Send `body`, gzipped when the client accepts it and the payload is big enough
+// to be worth it, and answer 304 when the client already has this exact ETag.
+function sendCached(req, res, body, etag, contentType) {
+  res.setHeader('ETag', etag);
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  const headers = { 'Content-Type': contentType };
+  let payload = body;
+  if (body.length > 1024 && /\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+    payload = zlib.gzipSync(body, { level: zlib.constants.Z_BEST_SPEED });
+    headers['Content-Encoding'] = 'gzip';
+  }
+  headers['Content-Length'] = payload.length;
+  res.writeHead(200, headers);
+  res.end(payload);
 }
 
 // ---------------- plan usage ---------------------------------------------------
@@ -303,8 +377,8 @@ const server = http.createServer((req, res) => {
         const v = parseFloat(q);
         if (!Number.isNaN(v)) hours = v;
       }
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(getEventsJson(hours));
+      const ev = getEventsResponse(hours);
+      sendCached(req, res, ev.body, ev.etag, 'application/json');
     } else if (req.method === 'GET' && pathname.startsWith('/usage.json')) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(getUsageJson());

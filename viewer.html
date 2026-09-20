@@ -577,6 +577,7 @@
 <script>
 const SVG_NS = "http://www.w3.org/2000/svg";
 let lastCount = 0;
+let lastEtag = null;
 let selectedNodeId = null;
 let selectedSessionId = null;   // null = show all
 let cachedEvents = [];
@@ -842,7 +843,13 @@ async function refresh(force) {
     } else {
       hours = raw;
     }
-    const r = await fetch("/events.json?hours=" + encodeURIComponent(hours), { cache: "no-store" });
+    // Revalidate with the ETag the server gave us: when nothing has changed the
+    // reply is an empty 304 instead of several MB of JSON on every poll.
+    const headers = {};
+    if (lastEtag && !force) headers["If-None-Match"] = lastEtag;
+    const r = await fetch("/events.json?hours=" + encodeURIComponent(hours), { cache: "no-store", headers });
+    if (r.status === 304) return;
+    lastEtag = r.headers.get("ETag");
     const events = await r.json();
     if (force || events.length !== lastCount) {
       const isNew = events.length > lastCount;
@@ -858,7 +865,7 @@ async function tick() {
   setTimeout(tick, 800);
 }
 
-function hoursChanged() { lastCount = -1; refresh(true); }
+function hoursChanged() { lastCount = -1; lastEtag = null; refresh(true); }
 
 function fmtNum(n) {
   if (n == null) return "-";
